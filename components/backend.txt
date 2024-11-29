@@ -1,0 +1,218 @@
+const AWS = require('aws-sdk');
+const dynamoDb = new AWS.DynamoDB.DocumentClient();
+
+const studentId = '1001234567';
+
+// Course page: Fetch all courses
+exports.handler = async () => {
+    const params = {
+        TableName: 'StudentCourses',
+        // When studentId matches and containerId is a courseId
+        FilterExpression: 'sk >= :minCourseId AND pk == studentId',
+        ExpressionAttributeValues: {
+            ':minCourseId': 100,
+        },
+    };
+
+    try {
+        const data = await dynamoDb.scan(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify(data.Items),
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: error.message }),
+        };
+    }
+};
+
+// Seminar page: Fetch All Seminars for a Course
+exports.handler = async (event) => {
+    const { courseId } = event.queryStringParameters;
+
+    const params = {
+        TableName: 'StudentCourses',
+        // When courseId is found
+        KeyConditionExpression: 'sk = :courseId',
+        ExpressionAttributeValues: {
+            ':courseId': parseInt(courseId),
+        },
+    };
+
+    try {
+        const data = await dynamoDb.query(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify(data.Items),
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: error.message }),
+        };
+    }
+};
+
+// Mark attendance
+exports.handler = async (event) => {
+    const { studentId, containerId, attendance } = JSON.parse(event.body);
+
+    const params = {
+        TableName: 'StudentCourses',
+        Key: {
+            pk: parseInt(studentId),
+            sk: parseInt(containerId),
+        },
+        UpdateExpression: 'SET attendance = :attendance',
+        ExpressionAttributeValues: {
+            ':attendance': attendance,
+        },
+        ReturnValues: 'UPDATED_NEW',
+    };
+
+    try {
+        const data = await dynamoDb.update(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify(data.Attributes),
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: error.message }),
+        };
+    }
+};
+
+// Submit feedback
+exports.handler = async (event) => {
+    const { studentId, seminarId, feedback } = JSON.parse(event.body);
+
+    const params = {
+        TableName: 'Attendance',
+        Key: {
+            pk: parseInt(studentId),
+            sk: parseInt(seminarId),
+        },
+        UpdateExpression: 'SET feedback = :feedback',
+        ExpressionAttributeValues: {
+            ':feedback': feedback,
+        },
+        ReturnValues: 'UPDATED_NEW',
+    };
+
+    try {
+        const data = await dynamoDb.update(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify(data.Attributes),
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: error.message }),
+        };
+    }
+};
+
+
+const express = require('express');
+const cors = require('cors');
+const AWS = require('aws-sdk');
+
+const app = express();
+const port = process.env.PORT || 5000;
+
+// Configure DynamoDB
+AWS.config.update({
+    region: 'us-west-2',
+    accessKeyId: 'ASIAYWGYOANCXAPW4XWN',
+    secretAccessKey: 'cu+6Ej2KEkuqizO9U5gAUEmRKlKtg342b9rFYttg'
+});
+
+const docClient = new AWS.DynamoDB.DocumentClient();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// API endpoint to fetch seminar data
+app.get('/seminars/:studentId', async (req, res) => {
+  const studentId = req.params.studentId;
+
+  const params = {
+    TableName: 'Seminars', // Replace with your DynamoDB table name
+    KeyConditionExpression: 'studentId = :studentId',
+    ExpressionAttributeValues: {
+      ':studentId': studentId,
+    },
+  };
+
+  try {
+    const data = await docClient.query(params).promise();
+    res.json(data.Items); // Return the seminar data as JSON
+  } catch (err) {
+    console.error('Error fetching seminars:', err);
+    res.status(500).json({ error: 'Unable to fetch seminar data' });
+  }
+});
+
+// API endpoint to mark attendance
+app.post('/attendance', async (req, res) => {
+  const { studentId, seminarId, attended } = req.body;
+
+  const params = {
+    TableName: 'Seminars',
+    Key: {
+      studentId: studentId,
+      seminarId: seminarId,
+    },
+    UpdateExpression: 'set attended = :attended',
+    ExpressionAttributeValues: {
+      ':attended': attended,
+    },
+    ReturnValues: 'ALL_NEW',
+  };
+
+  try {
+    const result = await docClient.update(params).promise();
+    res.json(result.Attributes); // Return updated seminar data
+  } catch (err) {
+    console.error('Error updating attendance:', err);
+    res.status(500).json({ error: 'Unable to update attendance' });
+  }
+});
+
+// API endpoint to submit feedback
+app.post('/feedback', async (req, res) => {
+  const { studentId, seminarId, feedback } = req.body;
+
+  const params = {
+    TableName: 'Seminars',
+    Key: {
+      studentId: studentId,
+      seminarId: seminarId,
+    },
+    UpdateExpression: 'set feedback = :feedback, feedbackSubmitted = :feedbackSubmitted',
+    ExpressionAttributeValues: {
+      ':feedback': feedback,
+      ':feedbackSubmitted': true,
+    },
+    ReturnValues: 'ALL_NEW',
+  };
+
+  try {
+    const result = await docClient.update(params).promise();
+    res.json(result.Attributes); // Return updated seminar data
+  } catch (err) {
+    console.error('Error submitting feedback:', err);
+    res.status(500).json({ error: 'Unable to submit feedback' });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server started on port ${port}`);
+});
+
